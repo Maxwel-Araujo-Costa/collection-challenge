@@ -1,10 +1,13 @@
 from pathlib import Path
 import pandas as pd
 import argparse
+import json
 
 BASE_DIR = Path(__file__).resolve().parent.parent / "data"
 orders_path = BASE_DIR / "orders.csv"
 customers_path = BASE_DIR / "customers.json"
+OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
+REPORT_PATH = OUTPUT_DIR / "report.json"
 
 def read_csv(file_path):
     # Reads a CSV file and return a DataFrame
@@ -35,7 +38,12 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Analyze customer orders.")
     parser.add_argument("--start-date", type=pd.to_datetime, required=True)
     parser.add_argument("--end-date", type=pd.to_datetime, required=True)
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    if args.start_date > args.end_date:
+        parser.error("--start-date não pode ser posterior a --end-date")
+    
+    return args
 
 def filter_orders_by_date(orders, start_date, end_date):
     # Filters orders to only include those within the given date range (inclusive).
@@ -86,6 +94,34 @@ def get_suspicious_orders_by_customer(orders):
         result[customer_id] = group[['order_id', 'value', 'date']].to_dict('records')
     return result
 
+def build_report(customer_summary, suspicious_by_customer):
+    # Builds the final report as a list of dicts, one per customer
+    report = []
+    for row in customer_summary.to_dict('records'):
+        customer_id = row['customer_id']
+        report.append({
+            'name': row['name'],
+            'category': row['tier'],
+            'total_spent_before_discount': round(row['total_spent'], 2),
+            'total_spent_after_discount': round(row['total_after_discount'], 2),
+            'suspicious_orders': suspicious_by_customer.get(customer_id, [])
+        })
+    return report
+
+def export_report(report, output_path):
+    # Serializes the report to JSON, handling pandas/numpy types
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def default_serializer(obj):
+        if isinstance(obj, pd.Timestamp):
+            return obj.strftime('%Y-%m-%d')
+        if hasattr(obj, 'item'):  # numpy scalar types (int64, float64, bool_)
+            return obj.item()
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(report, f, indent=2, ensure_ascii=False, default=default_serializer)
+
 def main():
     args = parse_arguments()
     orders = read_csv(orders_path)
@@ -95,11 +131,20 @@ def main():
     orders = filter_orders_by_date(orders, args.start_date, args.end_date)
     orders = flag_suspicious_orders(orders)
 
+    suspicious_by_customer = get_suspicious_orders_by_customer(orders)
+
     orders_with_customers = merge_dataframes(orders, customers)
+    orphans = orders_with_customers[orders_with_customers['name'].isna()]
+    if not orphans.empty:
+        print(f"Aviso: {len(orphans)} pedido(s) com customer_id sem correspondência em customers.json")
+
     customer_summary = aggregate_by_customer(orders_with_customers)
     customer_summary = apply_discounts(customer_summary)
 
-    print(customer_summary)
+    report = build_report(customer_summary, suspicious_by_customer)
+    export_report(report, REPORT_PATH)
+
+    print(f"Relatório gerado em: {REPORT_PATH}")
 
 if __name__ == "__main__":
     main()
