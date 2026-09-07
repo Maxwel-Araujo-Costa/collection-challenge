@@ -94,7 +94,7 @@ The application accepts a start and end date to define the analysis period.
 Example:
 
 ```bash
-python src/main.py --start-date 2026-01-01 --end-date 2026-03-31
+python src/main.py --start-date 2025-01-01 --end-date 2025-03-31
 ```
 
 Only orders within the specified period are considered when calculating totals, discounts, order counts, and suspicious orders.
