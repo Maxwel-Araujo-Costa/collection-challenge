@@ -71,6 +71,21 @@ def apply_discounts(merged_agg_df):
     )
     return customer_agg
 
+def flag_suspicious_orders(orders):
+    # Flags orders whose value is more than 3x the customer's average order value
+    orders = orders.copy()
+    customer_avg = orders.groupby('customer_id')['value'].transform('mean')
+    orders['is_suspicious'] = orders['value'] > (3 * customer_avg)
+    return orders
+
+def get_suspicious_orders_by_customer(orders):
+    # Returns a dict mapping customer_id -> list of suspicious order records
+    suspicious = orders[orders['is_suspicious']]
+    result = {}
+    for customer_id, group in suspicious.groupby('customer_id'):
+        result[customer_id] = group[['order_id', 'value', 'date']].to_dict('records')
+    return result
+
 def main():
     args = parse_arguments()
     orders = read_csv(orders_path)
@@ -78,6 +93,7 @@ def main():
 
     orders = prepare_orders_dataframe(orders)
     orders = filter_orders_by_date(orders, args.start_date, args.end_date)
+    orders = flag_suspicious_orders(orders)
 
     orders_with_customers = merge_dataframes(orders, customers)
     customer_summary = aggregate_by_customer(orders_with_customers)
